@@ -3,12 +3,12 @@ Tests for build.py: correctness of the built shared object, and cache
 behavior (hit/miss).
 """
 
-import ctypes
 import math
 
 import pytest
 
 from numba_enzyme.build import build
+from numba_enzyme.runtime import load
 from numba_enzyme.types import Float64
 
 
@@ -26,16 +26,10 @@ def _isolated_cache(tmp_path, monkeypatch):
 
 
 def test_build_produces_correct_gradient():
-    result = build(f)
-    lib = ctypes.CDLL(str(result.path))
-    grad_fn = getattr(lib, result.grad_symbol)
-    grad_fn.restype = None
-    grad_fn.argtypes = [ctypes.POINTER(ctypes.c_double)] + [ctypes.c_double] * result.n_args
-
-    out = (ctypes.c_double * result.n_args)()
-    grad_fn(out, 1.0)
+    diff = load(build(f))
+    (got,) = diff.grad(1.0)
     expected = math.cos(1.0) * 1.0 + math.sin(1.0) + 2 * 1.0
-    assert out[0] == pytest.approx(expected, abs=1e-9)
+    assert got == pytest.approx(expected, abs=1e-9)
 
 
 def test_second_build_is_a_cache_hit_with_no_subprocess_calls(monkeypatch):
