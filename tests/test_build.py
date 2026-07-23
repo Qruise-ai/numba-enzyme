@@ -48,6 +48,27 @@ def test_second_build_is_a_cache_hit_with_no_subprocess_calls(monkeypatch):
     assert second.path == first.path
 
 
+def test_second_build_result_is_actually_usable():
+    """
+    Regression test: a cache-hit BuiltKernel's symbol names must match
+    what's actually baked into the .so on disk, not be freshly (and
+    differently) recomputed. Numba embeds an internal per-qualname
+    version counter into the mangled symbol name that increments on
+    every nb.cfunc compilation of "the same" function, even with
+    identical source -- so recomputing symbol names via lower() on a
+    cache hit silently drifts from the names the cached .so actually
+    exports. See build()'s meta.json handling.
+    """
+    build(f)
+    second = build(f)
+    assert second.from_cache is True
+
+    diff = load(second)
+    (got,) = diff.grad(1.0)
+    expected = math.cos(1.0) * 1.0 + math.sin(1.0) + 2 * 1.0
+    assert got == pytest.approx(expected, abs=1e-9)
+
+
 def test_different_function_is_a_cache_miss():
     first = build(f)
     second = build(g)
