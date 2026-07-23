@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
 import os
 import subprocess
 from dataclasses import dataclass
@@ -57,20 +58,20 @@ def build(func: Callable) -> BuiltKernel:
     """
     entry_dir = _cache_dir() / _cache_key(func)
     so_path = entry_dir / "kernel.so"
+    meta_path = entry_dir / "meta.json"
+
+    if so_path.is_file() and meta_path.is_file():
+        # Don't call lower() again here: Numba embeds an internal version
+        # counter in the mangled symbol name that increments every time
+        # nb.cfunc compiles "the same" function again in the same process
+        # (confirmed empirically -- e.g. ...B2v1... vs ...B2v2...), even
+        # with identical source. Recomputing symbol names on a cache hit
+        # would silently drift from what's actually baked into the
+        # already-built .so. Persist them from the original build instead.
+        meta = json.loads(meta_path.read_text())
+        return BuiltKernel(path=so_path, from_cache=True, **meta)
 
     kernel = lower(func)
-    grad_symbol = f"grad_{kernel.entry_symbol}"
-    jvp_symbol = f"jvp_{kernel.entry_symbol}"
-
-    if so_path.is_file():
-        return BuiltKernel(
-            path=so_path,
-            grad_symbol=grad_symbol,
-            jvp_symbol=jvp_symbol,
-            n_args=kernel.n_args,
-            from_cache=True,
-        )
-
     drv = synthesize(kernel)
     tc = get_toolchain()
 
@@ -104,10 +105,11 @@ def build(func: Callable) -> BuiltKernel:
         check=True,
     )
 
-    return BuiltKernel(
-        path=so_path,
-        grad_symbol=grad_symbol,
-        jvp_symbol=jvp_symbol,
-        n_args=kernel.n_args,
-        from_cache=False,
-    )
+    meta = {
+        "grad_symbol": drv.grad_symbol,
+        "jvp_symbol": drv.jvp_symbol,
+        "n_args": kernel.n_args,
+    }
+    meta_path.write_text(json.dumps(meta))
+
+    return BuiltKernel(path=so_path, from_cache=False, **meta)
