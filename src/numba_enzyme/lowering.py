@@ -1,17 +1,31 @@
 """
-Lowers a Python function to LLVM IR via Numba, using the function's own
-type annotations (numba_enzyme.types classes) to build the Numba
-signature, and recovers the mangled entry-point symbol (the
-retptr/excinfo-ABI inner kernel, not the `cfunc.` wrapper) along with its
-exact parameter types for use by driver synthesis.
-"""
+Lower a Python function to LLVM IR via Numba.
 
-from __future__ import annotations
+Compiles a Python function to LLVM IR with Numba, using the function's
+own type annotations (:mod:`numba_enzyme.types` classes) to build the
+Numba signature, and recovers the mangled entry-point symbol -- the
+retptr/excinfo-ABI inner kernel, not the ``cfunc.`` wrapper. The recovered
+kernel's exact parameter types are validated against Numba's known ABI
+shape for use by driver synthesis.
+
+See Also
+--------
+numba_enzyme.driver.synthesise : Consumes the `LoweredKernel`.
+
+Examples
+--------
+>>> from numba_enzyme.lowering import lower
+>>> from numba_enzyme.types import Float64
+>>> def f(x: Float64) -> Float64:
+...     return x * x
+>>> lower(f).arg_types  # doctest: +SKIP
+('double*', '{ i8*, i32, i8*, i8*, i32 }**', 'double')
+"""
 
 import inspect
 import typing
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import llvmlite.binding as llvm_binding
 import numba as nb
@@ -20,7 +34,7 @@ _CFUNC_PREFIX = "cfunc."
 
 # Numba's fixed internal exception-info representation. Stable across
 # signatures/arities in principle, but re-checked on every lowering
-# rather than assumed -- this is the ABI this whole package leans on.
+# for the sake of sanity.
 _EXPECTED_EXCINFO_TYPE = "{ i8*, i32, i8*, i8*, i32 }**"
 
 # LLVM textual type for each scalar numba type this package accepts as
@@ -37,20 +51,93 @@ llvm_binding.initialize()
 
 class LoweringError(RuntimeError):
     """
-    Raised when Numba's emitted IR doesn't match the retptr/excinfo
-    entry-point ABI this package relies on.
+    Raise when Numba's emitted IR doesn't match the expected ABI.
+
+    Covers a missing/unresolvable type annotation, an unsupported
+    scalar type, and any deviation from the retptr/excinfo entry-point
+    shape this package relies on (wrong parameter count, name, or LLVM
+    type).
+
+    See Also
+    --------
+    lower : Raises this error when validation fails.
+
+    Examples
+    --------
+    >>> from numba_enzyme.lowering import LoweringError, lower
+    >>> def f(x):  # missing type annotations
+    ...     return x
+    >>> try:
+    ...     lower(f)
+    ... except LoweringError as exc:
+    ...     print(exc)  # doctest: +SKIP
     """
 
 
 @dataclass(frozen=True)
 class LoweredKernel:
+    """
+    A Numba-compiled kernel, validated against the expected ABI.
+
+    Attributes
+    ----------
+    ir : str
+        The full LLVM IR text Numba emitted for the compiled function.
+    entry_symbol : str
+        The mangled name of the retptr/excinfo-ABI entry point.
+    n_args : int
+        Number of scalar arguments `entry_symbol` takes.
+    arg_types : tuple of str
+        The entry point's real LLVM parameter types in order: the
+        output pointer, the exception-info pointer, then `n_args`
+        scalar types.
+
+    See Also
+    --------
+    lower : Builds and validates a `LoweredKernel` instance.
+
+    Examples
+    --------
+    >>> from numba_enzyme.lowering import lower
+    >>> from numba_enzyme.types import Float64
+    >>> def f(x: Float64) -> Float64:
+    ...     return x * x
+    >>> lower(f).n_args  # doctest: +SKIP
+    1
+    """
+
     ir: str
     entry_symbol: str
     n_args: int
-    arg_types: tuple[str, ...]  # retptr, excinfo, then n_args scalar types
+    arg_types: tuple[str, ...]
 
 
 def _numba_type_of(annotation) -> nb.types.Type:
+    """
+    Instantiate a `numba_enzyme.types` annotation to get its numba type.
+
+    Parameters
+    ----------
+    annotation : type
+        A `numba_enzyme.types` class, e.g. ``Float64``.
+
+    Returns
+    -------
+    numba.core.types.Type
+        The real numba type the annotation class's ``__new__`` returns.
+
+    Raises
+    ------
+    LoweringError
+        If `annotation` is not a callable `numba_enzyme.types`.
+
+    Examples
+    --------
+    >>> from numba_enzyme.lowering import _numba_type_of
+    >>> from numba_enzyme.types import Float64
+    >>> _numba_type_of(Float64)
+    float64
+    """
     try:
         return annotation()
     except TypeError as exc:
@@ -60,6 +147,31 @@ def _numba_type_of(annotation) -> nb.types.Type:
 
 
 def _llvm_scalar_type(numba_type: nb.types.Type) -> str:
+    """
+    Map a numba scalar type to its LLVM textual form.
+
+    Parameters
+    ----------
+    numba_type : numba.core.types.Type
+        One of the scalar types `numba_enzyme.types` supports.
+
+    Returns
+    -------
+    str
+        The corresponding LLVM IR textual type, e.g. ``"double"``.
+
+    Raises
+    ------
+    LoweringError
+        If `numba_type` is not one of the supported scalar types.
+
+    Examples
+    --------
+    >>> from numba_enzyme.lowering import _llvm_scalar_type
+    >>> import numba as nb
+    >>> _llvm_scalar_type(nb.types.float64)
+    'double'
+    """
     try:
         return _LLVM_SCALAR_TYPE[numba_type]
     except KeyError:
@@ -71,9 +183,44 @@ def _llvm_scalar_type(numba_type: nb.types.Type) -> str:
 
 def lower(func: Callable) -> LoweredKernel:
     """
-    Compile `func` to LLVM IR via Numba, using its parameter/return type
-    annotations (numba_enzyme.types classes) to build the signature, then
-    locate and validate its retptr/excinfo entry point.
+    Compile a Python function to a validated `LoweredKernel`.
+
+    Reads `func`'s parameter and return type annotations (each must be
+    a `numba_enzyme.types` class) to build the Numba signature, compiles
+    it with :func:`numba.cfunc`, then locates and validates the
+    resulting retptr/excinfo entry point.
+
+    Parameters
+    ----------
+    func : callable
+        A Python function whose parameters and return value are each
+        annotated with a `numba_enzyme.types` class, e.g.
+        ``def f(x: Float64) -> Float64: ...``.
+
+    Returns
+    -------
+    LoweredKernel
+        The compiled, validated kernel.
+
+    Raises
+    ------
+    LoweringError
+        If `func` is missing a type annotation, uses an unsupported
+        type, or Numba's emitted IR doesn't match the expected
+        retptr/excinfo entry-point shape.
+
+    See Also
+    --------
+    LoweredKernel : The validated result this function returns.
+
+    Examples
+    --------
+    >>> from numba_enzyme.lowering import lower
+    >>> from numba_enzyme.types import Float64
+    >>> def f(x: Float64) -> Float64:
+    ...     return x * x
+    >>> lower(f).arg_types  # doctest: +SKIP
+    ('double*', '{ i8*, i32, i8*, i8*, i32 }**', 'double')
     """
     hints = typing.get_type_hints(func)
     params = inspect.signature(func).parameters

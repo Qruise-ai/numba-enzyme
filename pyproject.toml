@@ -15,7 +15,27 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/numba_enzyme"]
 
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.numpydoc_validation]
+checks = [
+    "all",
+    "ES01",
+    "SA01",
+    "EX01",
+]
+exclude = [
+    '\.__init__$',
+    '\.__call__$',
+    'test_*',
+]
+
 [dependency-groups]
 dev = [
+    "numpydoc>=1.10.0",
+    "pre-commit>=4.6.1",
     "pytest>=9.1.1",
+    "ruff>=0.16.0",
 ]

@@ -2,9 +2,10 @@
 Module for primitive data types.
 """
 
+from abc import abstractmethod
+
 import numpy as np
 from numba import types
-from abc import abstractmethod
 
 Array = np.ndarray
 
@@ -168,7 +169,7 @@ def ArrayND(T: Number, ndim: int):
     return _ArrayFactory(
         f"Array{ndim}D_{T.__name__}",
         (AbstractArray,),
-        dict(eltype=T, ndim=ndim, n=n),
+        {"eltype": T, "ndim": ndim, "n": n},
     )
 
 
