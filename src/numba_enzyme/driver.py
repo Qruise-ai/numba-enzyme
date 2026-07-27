@@ -1,19 +1,29 @@
 """
-Synthesizes the Enzyme driver module via llvmlite.ir -- declares the
-Numba kernel with its exact discovered type (no bitcast needed) and builds
-the reverse-mode (__enzyme_autodiff) and forward-mode (__enzyme_fwddiff)
-entry points with the correct per-argument activity markers.
+Synthesise the Enzyme driver module for a lowered kernel.
 
-Differentiates the kernel's retptr/excinfo entry point DIRECTLY (no
-intermediate wrapper function performs a call), matching the Phase 0
-lesson: an intermediate wrapper making a real call through a mismatched
-bitcast crashes Enzyme's forward-mode generator. Here there is no
-mismatch at all -- the kernel is declared with its exact real type, taken
-straight from the validated LoweredKernel, so the only bitcast anywhere is
-the universal "(void*)KERNEL" address-of pattern.
+Builds a second LLVM IR module, via :mod:`llvmlite.ir`'s typed builder
+API rather than templated C source, declaring the Numba kernel with its
+exact discovered type (no bitcast needed) and defining the reverse-mode
+(``__enzyme_autodiff``) and forward-mode (``__enzyme_fwddiff``) entry
+points with the correct per-argument activity markers.
+
+See Also
+--------
+numba_enzyme.lowering.lower : Produces the `LoweredKernel` this module
+    consumes.
+numba_enzyme.build.build : Links and compiles the module this module
+    produces.
+
+Examples
+--------
+>>> from numba_enzyme.driver import synthesise
+>>> from numba_enzyme.lowering import lower
+>>> from numba_enzyme.types import Float64
+>>> def f(x: Float64) -> Float64:
+...     return x * x
+>>> synthesise(lower(f)).grad_symbol  # doctest: +SKIP
+'grad__ZN...'
 """
-
-from __future__ import annotations
 
 from dataclasses import dataclass
 
@@ -40,15 +50,67 @@ _SCALAR_IR_TYPE = {
 
 
 @dataclass(frozen=True)
-class SynthesizedDriver:
+class SynthesisedDriver:
+    """
+    The Enzyme driver module built for one `LoweredKernel`.
+
+    Attributes
+    ----------
+    ir : str
+        The driver module's full LLVM IR text, ready to be linked
+        against the kernel's own IR.
+    grad_symbol : str
+        Name of the reverse-mode entry point, ``grad_<entry_symbol>``.
+    jvp_symbol : str
+        Name of the forward-mode entry point, ``jvp_<entry_symbol>``.
+
+    See Also
+    --------
+    synthesise : Builds a `SynthesisedDriver` instance.
+
+    Examples
+    --------
+    >>> from numba_enzyme.driver import synthesise
+    >>> from numba_enzyme.lowering import lower
+    >>> from numba_enzyme.types import Float64
+    >>> def f(x: Float64) -> Float64:
+    ...     return x * x
+    >>> synthesise(lower(f)).jvp_symbol  # doctest: +SKIP
+    'jvp__ZN...'
+    """
+
     ir: str
     grad_symbol: str
     jvp_symbol: str
 
 
 def _target_lines(kernel_ir: str) -> tuple[str, str]:
-    """Mirror Numba's own target triple/datalayout so llvm-link doesn't
-    even emit its harmless mismatched-triple warning."""
+    """
+    Extract the target triple and datalayout from Numba's own IR.
+
+    Parameters
+    ----------
+    kernel_ir : str
+        The kernel's LLVM IR text, as produced by
+        `numba_enzyme.lowering.lower`.
+
+    Returns
+    -------
+    triple : str
+        The ``target triple`` string.
+    datalayout : str
+        The ``target datalayout`` string.
+
+    Examples
+    --------
+    >>> from numba_enzyme.driver import _target_lines
+    >>> from numba_enzyme.lowering import lower
+    >>> from numba_enzyme.types import Float64
+    >>> def f(x: Float64) -> Float64:
+    ...     return x * x
+    >>> _target_lines(lower(f).ir)  # doctest: +SKIP
+    ('x86_64-unknown-linux-gnu', 'e-m:e-...')
+    """
     triple = datalayout = None
     for line in kernel_ir.splitlines():
         if line.startswith("target triple"):
@@ -58,12 +120,38 @@ def _target_lines(kernel_ir: str) -> tuple[str, str]:
     return triple, datalayout
 
 
-def synthesize(kernel: LoweredKernel) -> SynthesizedDriver:
+def synthesise(kernel: LoweredKernel) -> SynthesisedDriver:
     """
-    Build the Enzyme driver module for `kernel`: a `grad_<entry>`
-    (reverse-mode) and `jvp_<entry>` (forward-mode) function.
+    Build the Enzyme driver module for a lowered kernel.
+
+    Parameters
+    ----------
+    kernel : numba_enzyme.lowering.LoweredKernel
+        The validated, compiled kernel to differentiate.
+
+    Returns
+    -------
+    SynthesisedDriver
+        The driver module defining ``grad_<entry>`` (reverse-mode) and
+        ``jvp_<entry>`` (forward-mode) for `kernel`.
+
+    See Also
+    --------
+    SynthesisedDriver : The result this function returns.
+    numba_enzyme.lowering.lower : Produces the `kernel` this function
+        consumes.
+
+    Examples
+    --------
+    >>> from numba_enzyme.driver import synthesise
+    >>> from numba_enzyme.lowering import lower
+    >>> from numba_enzyme.types import Float64
+    >>> def f(x: Float64) -> Float64:
+    ...     return x * x
+    >>> synthesise(lower(f)).grad_symbol  # doctest: +SKIP
+    'grad__ZN...'
     """
-    retptr_str, _excinfo_str, *scalar_strs = kernel.arg_types
+    retptr_str, _, *scalar_strs = kernel.arg_types
     ret_scalar_type = _SCALAR_IR_TYPE[retptr_str[:-1]]
     arg_scalar_types = [_SCALAR_IR_TYPE[s] for s in scalar_strs]
     n_args = len(arg_scalar_types)
@@ -74,7 +162,11 @@ def synthesize(kernel: LoweredKernel) -> SynthesizedDriver:
     excinfo_ptr_type = _EXCINFO_STRUCT.as_pointer()
     kernel_func_type = ir.FunctionType(
         ir.IntType(32),
-        [ret_scalar_type.as_pointer(), excinfo_ptr_type.as_pointer(), *arg_scalar_types],
+        [
+            ret_scalar_type.as_pointer(),
+            excinfo_ptr_type.as_pointer(),
+            *arg_scalar_types,
+        ],
     )
     kernel_fn = ir.Function(module, kernel_func_type, name=kernel.entry_symbol)
 
@@ -100,10 +192,14 @@ def synthesize(kernel: LoweredKernel) -> SynthesizedDriver:
     # it to the required hidden-pointer/sret convention the way a real C
     # frontend would.)
     grad_ret_type = (
-        ret_scalar_type if n_args == 1 else ir.LiteralStructType([ret_scalar_type] * n_args)
+        ret_scalar_type
+        if n_args == 1
+        else ir.LiteralStructType([ret_scalar_type] * n_args)
     )
     autodiff_fn = ir.Function(
-        module, ir.FunctionType(grad_ret_type, [i8p], var_arg=True), name="__enzyme_autodiff"
+        module,
+        ir.FunctionType(grad_ret_type, [i8p], var_arg=True),
+        name="__enzyme_autodiff",
     )
 
     out_ptr_type = ret_scalar_type.as_pointer()
@@ -147,15 +243,19 @@ def synthesize(kernel: LoweredKernel) -> SynthesizedDriver:
 
     # ---- forward mode: jvp_<entry> ----
     # Every active arg is a (primal, tangent) dup pair; the JVP always
-    # lands in d_result's shadow regardless of n_args, matching Phase 0.
+    # lands in d_result's shadow regardless of n_args.
     jvp_arg_types = []
     for t in arg_scalar_types:
         jvp_arg_types.extend([t, t])
     fwddiff_fn = ir.Function(
-        module, ir.FunctionType(ret_scalar_type, [i8p], var_arg=True), name="__enzyme_fwddiff"
+        module,
+        ir.FunctionType(ret_scalar_type, [i8p], var_arg=True),
+        name="__enzyme_fwddiff",
     )
 
-    jvp_fn = ir.Function(module, ir.FunctionType(ret_scalar_type, jvp_arg_types), name=jvp_symbol)
+    jvp_fn = ir.Function(
+        module, ir.FunctionType(ret_scalar_type, jvp_arg_types), name=jvp_symbol
+    )
     for i in range(n_args):
         jvp_fn.args[2 * i].name = f"x{i}"
         jvp_fn.args[2 * i + 1].name = f"dx{i}"
@@ -184,4 +284,6 @@ def synthesize(kernel: LoweredKernel) -> SynthesizedDriver:
     b2.call(fwddiff_fn, call_args2)
     b2.ret(b2.load(d_result_ptr2))
 
-    return SynthesizedDriver(ir=str(module), grad_symbol=grad_symbol, jvp_symbol=jvp_symbol)
+    return SynthesisedDriver(
+        ir=str(module), grad_symbol=grad_symbol, jvp_symbol=jvp_symbol
+    )
