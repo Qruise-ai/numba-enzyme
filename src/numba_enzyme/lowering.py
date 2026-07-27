@@ -10,7 +10,7 @@ shape for use by driver synthesis.
 
 See Also
 --------
-numba_enzyme.driver.synthesize : Consumes the `LoweredKernel`.
+numba_enzyme.driver.synthesise : Consumes the `LoweredKernel`.
 
 Examples
 --------
