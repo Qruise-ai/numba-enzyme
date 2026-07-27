@@ -105,7 +105,7 @@ def test_no_call_through_a_bitcast_after_linking(func):
     """
     Regression guard for the Phase 0 crash class: a kernel declared with
     a type that doesn't exactly match its real definition forces
-    llvm-link to synthesize a call through a bitcasted callee (textually
+    llvm-link to synthesise a call through a bitcasted callee (textually
     "call ... bitcast (...)*(...)"), which crashed Enzyme's forward-mode
     generator. driver.py avoids this by construction -- it declares the
     kernel using its exact real type from LoweredKernel -- but check the
