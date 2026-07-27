@@ -39,4 +39,9 @@ def f_mixed(x: Float64, n: Int32) -> Float64:
 def test_lower_supports_mixed_scalar_types():
     result = lower(f_mixed)
     assert result.n_args == 2
-    assert result.arg_types == ("double*", "{ i8*, i32, i8*, i8*, i32 }**", "double", "i32")
+    assert result.arg_types == (
+        "double*",
+        "{ i8*, i32, i8*, i8*, i32 }**",
+        "double",
+        "i32",
+    )

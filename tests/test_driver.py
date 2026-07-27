@@ -43,7 +43,9 @@ def _isolated_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("NUMBA_ENZYME_CACHE_DIR", str(tmp_path))
 
 
-@pytest.mark.parametrize("func,analytic_grad", [(f1, f1_grad), (f2, f2_grad), (f3, f3_grad)])
+@pytest.mark.parametrize(
+    "func,analytic_grad", [(f1, f1_grad), (f2, f2_grad), (f3, f3_grad)]
+)
 def test_grad_matches_analytic(func, analytic_grad):
     diff = load(build(func))
     xs = tuple(1.0 + 0.3 * i for i in range(diff.n_args))
@@ -53,7 +55,9 @@ def test_grad_matches_analytic(func, analytic_grad):
         assert g == pytest.approx(e, abs=1e-9)
 
 
-@pytest.mark.parametrize("func,analytic_grad", [(f1, f1_grad), (f2, f2_grad), (f3, f3_grad)])
+@pytest.mark.parametrize(
+    "func,analytic_grad", [(f1, f1_grad), (f2, f2_grad), (f3, f3_grad)]
+)
 def test_jvp_matches_analytic(func, analytic_grad):
     diff = load(build(func))
     n = diff.n_args
