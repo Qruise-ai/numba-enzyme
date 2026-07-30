@@ -63,6 +63,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG PY311_VERSION=3.11.15
 ARG PY312_VERSION=3.12.13
 ARG PY313_VERSION=3.13.14
+# cibuildwheel 4.1.1 unconditionally hardcodes /opt/python/cp39-cp39/bin
+# into PATH to run its own before_all housekeeping (an environment
+# snapshot via `python -c 'import sys, json, os; ...'`) -- regardless
+# of the actual build target selector (confirmed by reading
+# cibuildwheel/platforms/linux.py directly; not documented anywhere).
+# This interpreter never builds or tests an actual wheel, so it's built
+# below without --enable-optimizations (skips an expensive PGO build
+# that would only matter for a real workload) and without auditwheel.
+ARG PY39_VERSION=3.9.25
+
+RUN set -eux; \
+    version="${PY39_VERSION}"; minor="${version%.*}"; tag="cp39-cp39"; \
+    curl -fsSL "https://www.python.org/ftp/python/${version}/Python-${version}.tar.xz" -o /tmp/python.tar.xz; \
+    mkdir -p /tmp/build && tar -xf /tmp/python.tar.xz -C /tmp/build; \
+    ( cd "/tmp/build/Python-${version}" \
+      && ./configure --prefix="/opt/python/${tag}" \
+      && make -j"$(nproc)" \
+      && make install ); \
+    rm -rf /tmp/build /tmp/python.tar.xz; \
+    ln -sf "python${minor}" "/opt/python/${tag}/bin/python"
 
 RUN set -eux; \
     for spec in "cp311-cp311:${PY311_VERSION}" "cp312-cp312:${PY312_VERSION}" "cp313-cp313:${PY313_VERSION}"; do \
