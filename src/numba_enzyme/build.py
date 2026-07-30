@@ -249,6 +249,18 @@ def build(func: Callable) -> BuiltKernel:
         ],
         check=True,
     )
+    # `clang -shared` shells out to a separate linker executable for the
+    # final link step. A vendored toolchain (see toolchain.py) ships its
+    # own `ld.lld` right next to clang specifically so this works with no
+    # system linker present at all -- confirmed necessary by a real
+    # install on a bare-minimum target (python:3.11-slim has no system
+    # `ld`/binutils: "clang: error: unable to execute command: Executable
+    # 'ld' doesn't exist!"). The system/dev-mode toolchain doesn't need
+    # this -- a normal dev machine already has a system `ld` -- so only
+    # pass it when the vendored linker actually exists next to clang.
+    vendored_lld = tc.clang.parent / "ld.lld"
+    extra_link_args = [f"-fuse-ld={vendored_lld}"] if vendored_lld.is_file() else []
+
     # TODO: consider `-O3` at some point
     subprocess.run(
         [
@@ -258,6 +270,7 @@ def build(func: Callable) -> BuiltKernel:
             "-O2",
             "-fPIC",
             "-shared",
+            *extra_link_args,
             str(enzyme_out_ll),
             "-o",
             str(so_path),

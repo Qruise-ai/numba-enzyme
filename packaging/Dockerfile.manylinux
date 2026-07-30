@@ -36,11 +36,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         > /etc/apt/sources.list.d/llvm-15.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        llvm-15-dev clang-15 \
+        llvm-15-dev clang-15 lld-15 \
         cmake build-essential git patchelf \
         libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
         libffi-dev liblzma-dev tk-dev uuid-dev libncurses-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# lld-15 (LLVM's own linker) is vendored alongside clang, not relied on
+# from the system: `clang -shared` still shells out to a SEPARATE
+# linker executable for the final link step, and a bare-minimum target
+# image (confirmed via a real smoke test on python:3.11-slim) has no
+# system `ld`/binutils at all -- "clang: error: unable to execute
+# command: Executable "ld" doesn't exist!". clang searches its own
+# binary's directory for a linker named `ld.lld` when given
+# `-fuse-ld=lld`, so vendoring it alongside clang (see
+# cibw_before_all.sh) keeps the whole thing self-contained with no
+# system linker dependency at all -- confirmed working with a fully
+# stripped environment (env -i, no PATH/LD_LIBRARY_PATH pointing at any
+# system LLVM) before wiring this in.
 
 # Building LLVMEnzyme-15.so itself happens in CIBW_BEFORE_ALL
 # (packaging/cibw_before_all.sh), not baked into this image -- keeps

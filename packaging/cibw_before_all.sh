@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # CIBW_BEFORE_ALL: runs once per platform container, before any
 # per-Python-version wheel build starts. Builds LLVMEnzyme-15.so from
-# the pinned Enzyme release and stages it plus clang/opt/llvm-link into
-# a location that persists for the rest of this cibuildwheel session
+# the pinned Enzyme release and stages it plus clang/opt/llvm-link/ld.lld
+# into a location that persists for the rest of this cibuildwheel session
 # (packaging/cibw_before_build.sh copies from here into
 # src/numba_enzyme/_vendor/ before each per-Python-version build).
 #
@@ -48,6 +48,16 @@ cp "$WORK_DIR/enzyme-build/Enzyme/LLVMEnzyme-15.so" "$STAGING_DIR/enzyme/LLVMEnz
 cp /usr/lib/llvm-15/bin/clang "$STAGING_DIR/bin/clang"
 cp /usr/lib/llvm-15/bin/opt "$STAGING_DIR/bin/opt"
 cp /usr/lib/llvm-15/bin/llvm-link "$STAGING_DIR/bin/llvm-link"
+# `clang -shared` shells out to a separate linker executable for the
+# final link step -- vendoring lld (LLVM's own linker) as `ld.lld`
+# right next to clang keeps this self-contained with no system linker
+# dependency. `-L` dereferences the real binary rather than copying the
+# `ld.lld -> lld` symlink itself, since only the dispatch-on-argv[0]
+# name (`ld.lld`) matters, not how it got there. Confirmed working with
+# a fully stripped environment before wiring this in -- see build.py's
+# `-fuse-ld=lld` flag, which is what actually makes clang use this
+# instead of looking for a system `ld`.
+cp -L /usr/lib/llvm-15/bin/ld.lld "$STAGING_DIR/bin/ld.lld"
 
 echo "== staged contents =="
 find "$STAGING_DIR" -type f -exec ls -lh {} \;
