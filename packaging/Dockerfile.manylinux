@@ -1,0 +1,88 @@
+# Custom cibuildwheel container image for numba-enzyme (Linux x86_64).
+#
+# UNVERIFIED AS WRITTEN: no docker/podman was available in the sandbox
+# this was authored in, so this file has not been built or run. The
+# vendoring mechanics it exists to support (auditwheel correctly
+# repairing vendored *executables*, RPATH self-containment with zero
+# system LLVM present) WERE independently verified via a manual spike
+# outside Docker -- see the packaging plan / project memory for that.
+# This Dockerfile needs a real `docker build` + cibuildwheel run to
+# confirm before relying on it; expect to iterate.
+#
+# Mirrors the actual dev environment this package was built and proven
+# in: Debian 13 (trixie) base, with LLVM 15 pulled from apt.llvm.org's
+# "bookworm" channel (there is no llvm-15 channel for trixie itself;
+# Debian's ABI is stable enough across this one release gap for
+# bookworm's LLVM 15 .debs to work on trixie -- confirmed on the actual
+# dev box, not assumed).
+
+FROM debian:trixie
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- LLVM 15 (matches the proven dev-environment setup exactly), plus
+#     cmake/build-essential/git/patchelf (patchelf is required by
+#     auditwheel repair -- confirmed during the manual spike it is NOT
+#     installed by default) and CPython's own build dependencies
+#     (building 3.11/3.12/3.13 from source below, since trixie's apt
+#     only ships 3.13 and cibuildwheel's custom-image contract requires
+#     every target version pre-installed under /opt/python/, matching
+#     the official manylinux image convention). ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl gnupg ca-certificates \
+    && curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+        | gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-15 main" \
+        > /etc/apt/sources.list.d/llvm-15.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        llvm-15-dev clang-15 \
+        cmake build-essential git patchelf \
+        libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+        libffi-dev liblzma-dev tk-dev uuid-dev libncurses-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Building LLVMEnzyme-15.so itself happens in CIBW_BEFORE_ALL
+# (packaging/cibw_before_all.sh), not baked into this image -- keeps
+# the pinned Enzyme release tag a build-time choice, not an
+# image-rebuild-required one.
+
+# --- Python interpreters, matching manylinux's /opt/python/<tag>-<tag>/
+#     convention exactly -- cibuildwheel requires this layout for any
+#     custom (non-pypa-maintained) image; it does not provision
+#     interpreters into a container it doesn't control. Patch versions
+#     current as of authoring; bump to latest as needed. ---
+ARG PY311_VERSION=3.11.15
+ARG PY312_VERSION=3.12.13
+ARG PY313_VERSION=3.13.14
+
+RUN set -eux; \
+    for spec in "cp311-cp311:${PY311_VERSION}" "cp312-cp312:${PY312_VERSION}" "cp313-cp313:${PY313_VERSION}"; do \
+        tag="${spec%%:*}"; version="${spec##*:}"; minor="${version%.*}"; \
+        curl -fsSL "https://www.python.org/ftp/python/${version}/Python-${version}.tar.xz" -o /tmp/python.tar.xz; \
+        mkdir -p /tmp/build && tar -xf /tmp/python.tar.xz -C /tmp/build; \
+        ( cd "/tmp/build/Python-${version}" \
+          && ./configure --prefix="/opt/python/${tag}" --enable-optimizations --with-ensurepip=install \
+          && make -j"$(nproc)" \
+          && make install ); \
+        rm -rf /tmp/build /tmp/python.tar.xz; \
+        "/opt/python/${tag}/bin/python${minor}" -m pip install --no-cache-dir --upgrade pip; \
+        ln -sf "python${minor}" "/opt/python/${tag}/bin/python"; \
+        ln -sf "python${minor}" "/opt/python/${tag}/bin/python3"; \
+    done
+
+# auditwheel must be importable wherever cibuildwheel invokes it inside
+# the container -- installed against the newest interpreter for now;
+# UNVERIFIED whether cibuildwheel expects it per-interpreter or expects
+# a single fixed one on PATH. Confirm and adjust once real builds run.
+RUN /opt/python/cp313-cp313/bin/pip3 install --no-cache-dir auditwheel
+
+ENV PATH="/opt/python/cp313-cp313/bin:${PATH}"
+
+# cibuildwheel/auditwheel cannot infer the manylinux compat tag for a
+# custom (non-pypa) image on their own. This exact value was measured,
+# not guessed: `auditwheel show` on binaries built precisely this way
+# (Debian trixie base + apt.llvm.org bookworm LLVM 15 channel) during
+# the manual spike reported "manylinux_2_39_x86_64" as the achievable
+# tag. Re-verify if the base image or LLVM channel ever changes.
+ENV AUDITWHEEL_PLAT=manylinux_2_39_x86_64

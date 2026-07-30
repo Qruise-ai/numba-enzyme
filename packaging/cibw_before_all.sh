@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# CIBW_BEFORE_ALL: runs once per platform container, before any
+# per-Python-version wheel build starts. Builds LLVMEnzyme-15.so from
+# the pinned Enzyme release and stages it plus clang/opt/llvm-link into
+# a location that persists for the rest of this cibuildwheel session
+# (packaging/cibw_before_build.sh copies from here into
+# src/numba_enzyme/_vendor/ before each per-Python-version build).
+#
+# UNVERIFIED AS WRITTEN: authored without access to a real
+# cibuildwheel/Docker run (see packaging/Dockerfile.manylinux's header).
+# The cmake invocation itself is NOT a guess -- it's the exact one
+# already proven working in numba_autodiff/enzyme-build/ on the dev box.
+#
+# Usage: cibw_before_all.sh
+# (no project-dir argument needed -- Enzyme is cloned fresh from
+# GitHub, nothing from the project tree is read here)
+
+set -euo pipefail
+
+ENZYME_TAG="v0.0.289"
+STAGING_DIR="/tmp/numba_enzyme_vendor_staging"
+
+rm -rf "$STAGING_DIR"
+mkdir -p "$STAGING_DIR/bin" "$STAGING_DIR/enzyme"
+
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+echo "== cloning Enzyme @ $ENZYME_TAG =="
+git clone --depth 1 --branch "$ENZYME_TAG" https://github.com/EnzymeAD/Enzyme.git "$WORK_DIR/enzyme-src"
+
+echo "== configuring Enzyme against LLVM 15 =="
+cmake -S "$WORK_DIR/enzyme-src/enzyme" -B "$WORK_DIR/enzyme-build" \
+    -DLLVM_DIR=/usr/lib/llvm-15/lib/cmake/llvm \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DENZYME_CLANG=OFF \
+    -DENZYME_MLIR=OFF \
+    -DENZYME_FORTRAN=OFF \
+    -DENZYME_FLANG=OFF \
+    -DENZYME_ENABLE_REACTANT=OFF \
+    -DENZYME_ENABLE_BENCHMARKS=OFF
+
+echo "== building LLVMEnzyme-15.so =="
+cmake --build "$WORK_DIR/enzyme-build" --target LLVMEnzyme-15 -j"$(nproc)"
+
+echo "== staging vendored binaries =="
+cp "$WORK_DIR/enzyme-build/Enzyme/LLVMEnzyme-15.so" "$STAGING_DIR/enzyme/LLVMEnzyme-15.so"
+cp /usr/lib/llvm-15/bin/clang "$STAGING_DIR/bin/clang"
+cp /usr/lib/llvm-15/bin/opt "$STAGING_DIR/bin/opt"
+cp /usr/lib/llvm-15/bin/llvm-link "$STAGING_DIR/bin/llvm-link"
+
+echo "== staged contents =="
+find "$STAGING_DIR" -type f -exec ls -lh {} \;
