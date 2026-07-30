@@ -51,7 +51,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #     convention exactly -- cibuildwheel requires this layout for any
 #     custom (non-pypa-maintained) image; it does not provision
 #     interpreters into a container it doesn't control. Patch versions
-#     current as of authoring; bump to latest as needed. ---
+#     current as of authoring; bump to latest as needed.
+#
+#     auditwheel is installed into EVERY interpreter here, not just one:
+#     cibuildwheel's own docs say a custom image must already have
+#     auditwheel present, and its container-build repair step runs with
+#     the per-build interpreter's bin/ prepended to PATH
+#     (cibuildwheel/platforms/linux.py) -- installing it against only one
+#     interpreter and hoping PATH falls back to find it elsewhere isn't
+#     something to bet on. ---
 ARG PY311_VERSION=3.11.15
 ARG PY312_VERSION=3.12.13
 ARG PY313_VERSION=3.13.14
@@ -66,16 +74,10 @@ RUN set -eux; \
           && make -j"$(nproc)" \
           && make install ); \
         rm -rf /tmp/build /tmp/python.tar.xz; \
-        "/opt/python/${tag}/bin/python${minor}" -m pip install --no-cache-dir --upgrade pip; \
+        "/opt/python/${tag}/bin/python${minor}" -m pip install --no-cache-dir --upgrade pip auditwheel; \
         ln -sf "python${minor}" "/opt/python/${tag}/bin/python"; \
         ln -sf "python${minor}" "/opt/python/${tag}/bin/python3"; \
     done
-
-# auditwheel must be importable wherever cibuildwheel invokes it inside
-# the container -- installed against the newest interpreter for now;
-# UNVERIFIED whether cibuildwheel expects it per-interpreter or expects
-# a single fixed one on PATH. Confirm and adjust once real builds run.
-RUN /opt/python/cp313-cp313/bin/pip3 install --no-cache-dir auditwheel
 
 ENV PATH="/opt/python/cp313-cp313/bin:${PATH}"
 
