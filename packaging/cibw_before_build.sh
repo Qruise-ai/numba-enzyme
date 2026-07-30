@@ -25,6 +25,7 @@ rm -rf "$VENDOR_DIR"
 mkdir -p "$VENDOR_DIR"
 cp -r "$STAGING_DIR/bin" "$VENDOR_DIR/bin"
 cp -r "$STAGING_DIR/enzyme" "$VENDOR_DIR/enzyme"
+cp -r "$STAGING_DIR/crt" "$VENDOR_DIR/crt"
 chmod +x "$VENDOR_DIR/bin/"*
 
 echo "== populated $VENDOR_DIR =="

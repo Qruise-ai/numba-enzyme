@@ -21,7 +21,7 @@ ENZYME_TAG="v0.0.289"
 STAGING_DIR="/tmp/numba_enzyme_vendor_staging"
 
 rm -rf "$STAGING_DIR"
-mkdir -p "$STAGING_DIR/bin" "$STAGING_DIR/enzyme"
+mkdir -p "$STAGING_DIR/bin" "$STAGING_DIR/enzyme" "$STAGING_DIR/crt"
 
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -58,6 +58,26 @@ cp /usr/lib/llvm-15/bin/llvm-link "$STAGING_DIR/bin/llvm-link"
 # `-fuse-ld=lld` flag, which is what actually makes clang use this
 # instead of looking for a system `ld`.
 cp -L /usr/lib/llvm-15/bin/ld.lld "$STAGING_DIR/bin/ld.lld"
+
+# The final `clang -shared` link step needs the C runtime startup
+# objects and libgcc that a system C toolchain (gcc/libc6-dev) normally
+# provides -- confirmed missing on a bare-minimum target
+# (python:3.11-slim has none of these: "ld.lld: error: cannot open
+# crti.o", "unable to find library -lgcc"). Unlike libc/libm
+# themselves (which build.py locates on the *target* machine at
+# runtime via /proc/self/maps, since that's the one machine guaranteed
+# to already have them loaded), these come from the *build* image's
+# own gcc installation and are baked into the wheel here. `libgcc.a`
+# (the static archive, not `libgcc_s.so`) is deliberately used so the
+# resulting .so has no runtime dependency on libgcc_s.so.1 either --
+# confirmed via `ldd` on a real linked test .so showing only
+# libc.so.6/libm.so.6 as NEEDED entries. `gcc -print-file-name=` finds
+# the exact paths portably regardless of the installed gcc version.
+cp "$(gcc -print-file-name=crti.o)" "$STAGING_DIR/crt/crti.o"
+cp "$(gcc -print-file-name=crtn.o)" "$STAGING_DIR/crt/crtn.o"
+cp "$(gcc -print-file-name=crtbeginS.o)" "$STAGING_DIR/crt/crtbeginS.o"
+cp "$(gcc -print-file-name=crtendS.o)" "$STAGING_DIR/crt/crtendS.o"
+cp "$(gcc -print-file-name=libgcc.a)" "$STAGING_DIR/crt/libgcc.a"
 
 echo "== staged contents =="
 find "$STAGING_DIR" -type f -exec ls -lh {} \;

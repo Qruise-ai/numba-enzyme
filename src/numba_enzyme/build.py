@@ -25,6 +25,7 @@ import hashlib
 import inspect
 import json
 import os
+import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -161,6 +162,51 @@ def _cache_key(func: Callable) -> str:
     return hashlib.sha256(digest_input.encode()).hexdigest()
 
 
+_LIBC_MAP_RE = re.compile(r"(/\S*/lib(c|m)\.so(?:\.\d+)*)$")
+
+
+def _locate_runtime_libs() -> list[Path]:
+    """
+    Find the running process's own loaded libc/libm, via ``/proc/self/maps``.
+
+    Used only for the vendored-crt link path (see `build`): a vendored
+    toolchain ships its own crt startup objects and a static `libgcc`,
+    but deliberately does not vendor libc/libm themselves. Every Linux
+    target that can run this Python process at all has *already*
+    loaded some libc into it by the time this runs, so reading its own
+    memory map back is a distro/layout-agnostic way to find the exact
+    file to link against -- unlike hardcoding a path convention such
+    as Debian's ``/lib/x86_64-linux-gnu/``, which doesn't exist on e.g.
+    Fedora/RHEL/Arch. Confirmed empirically: a link built this way on
+    Debian trixie produces a shared object whose only `NEEDED` entries
+    are ``libc.so.6``/``libm.so.6`` -- nothing path- or distro-specific
+    baked in.
+
+    Returns
+    -------
+    list of pathlib.Path
+        Absolute paths to the loaded libc and (if present as a
+        separate mapping -- recent glibc merges it into libc) libm.
+
+    See Also
+    --------
+    build : The only caller; used when a vendored crt directory exists.
+
+    Examples
+    --------
+    >>> from numba_enzyme.build import _locate_runtime_libs
+    >>> any(p.name.startswith("libc.so") for p in _locate_runtime_libs())
+    True
+    """
+    found: dict[str, Path] = {}
+    with open("/proc/self/maps") as f:
+        for line in f:
+            match = _LIBC_MAP_RE.search(line)
+            if match:
+                found.setdefault(match.group(2), Path(match.group(1)))
+    return list(found.values())
+
+
 def build(func: Callable) -> BuiltKernel:
     """
     Build, or fetch from cache, the shared object for a function.
@@ -261,17 +307,46 @@ def build(func: Callable) -> BuiltKernel:
     vendored_lld = tc.clang.parent / "ld.lld"
     extra_link_args = [f"-fuse-ld={vendored_lld}"] if vendored_lld.is_file() else []
 
+    # Even with a linker present, `-shared` needs C runtime startup
+    # objects (crti.o/crtn.o/crtbeginS.o/crtendS.o) and libgcc, normally
+    # supplied by a system C toolchain (gcc/libc6-dev) -- confirmed
+    # missing on the same bare-minimum target ("ld.lld: error: cannot
+    # open crti.o", "unable to find library -lgcc"). A vendored
+    # toolchain ships these too (see cibw_before_all.sh); `-nostdlib`
+    # stops clang from also trying to supply its own defaults (which
+    # would look in system paths that don't exist here) so every input
+    # is explicit. libc/libm are deliberately NOT vendored -- they're
+    # located on the actual target machine instead (`_locate_runtime_libs`),
+    # since baking in one distro's copy or path convention would break
+    # on any other. Dev-mode/system toolchain untouched: this whole
+    # block only runs when `_vendor/crt/` actually exists.
+    vendored_crt_dir = tc.clang.parent.parent / "crt"
+    post_input_args = []
+    if vendored_crt_dir.is_dir():
+        extra_link_args.append("-nostdlib")
+        post_input_args = [
+            "-x",
+            "none",
+            str(vendored_crt_dir / "crti.o"),
+            str(vendored_crt_dir / "crtbeginS.o"),
+            str(vendored_crt_dir / "libgcc.a"),
+            *[str(p) for p in _locate_runtime_libs()],
+            str(vendored_crt_dir / "crtendS.o"),
+            str(vendored_crt_dir / "crtn.o"),
+        ]
+
     # TODO: consider `-O3` at some point
     subprocess.run(
         [
             str(tc.clang),
-            "-x",
-            "ir",
             "-O2",
             "-fPIC",
             "-shared",
             *extra_link_args,
+            "-x",
+            "ir",
             str(enzyme_out_ll),
+            *post_input_args,
             "-o",
             str(so_path),
         ],
