@@ -2,7 +2,10 @@
 Locate the required external build tools.
 
 Resolves the ``clang``/``llvm-link``/``opt`` binaries
-and the standalone Enzyme LLVM pass plugin.
+and the standalone Enzyme LLVM pass plugin. Prefers a `_vendor/`
+directory shipped alongside this module (populated at wheel-build time
+by the `cibuildwheel` pipeline) and falls back to the system-installed,
+``PATH``-resolved tools used during development.
 
 See Also
 --------
@@ -26,6 +29,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_PLUGIN_PATH = _REPO_ROOT / "enzyme-build" / "Enzyme" / "LLVMEnzyme-15.so"
 _PLUGIN_PATH_ENV_VAR = "NUMBA_ENZYME_PLUGIN_PATH"
+_VENDOR_DIR = Path(__file__).resolve().parent / "_vendor"
 
 
 class ToolchainError(RuntimeError):
@@ -108,15 +112,100 @@ def _which(name: str) -> Path | None:
     return Path(found) if found else None
 
 
+def _resolve_vendored() -> Toolchain | None:
+    """
+    Resolve tools from the `_vendor/` directory shipped in a wheel.
+
+    Returns
+    -------
+    Toolchain or None
+        The vendored paths, or `None` if `_vendor/` doesn't exist
+        (e.g. running from source rather than an installed wheel).
+
+    See Also
+    --------
+    _resolve_system : The fallback used when this returns `None`.
+
+    Examples
+    --------
+    >>> from numba_enzyme.toolchain import _resolve_vendored
+    >>> _resolve_vendored() is None  # doctest: +SKIP
+    True
+    """
+    vendored_clang = _VENDOR_DIR / "bin" / "clang"
+    if not vendored_clang.is_file():
+        return None
+    return Toolchain(
+        clang=vendored_clang,
+        llvm_link=_VENDOR_DIR / "bin" / "llvm-link",
+        opt=_VENDOR_DIR / "bin" / "opt",
+        enzyme_plugin=_VENDOR_DIR / "enzyme" / "LLVMEnzyme-15.so",
+    )
+
+
+def _resolve_system() -> tuple[Toolchain | None, list[str]]:
+    """
+    Resolve tools from the system ``PATH`` (the development-mode path).
+
+    Returns
+    -------
+    Toolchain or None
+        The resolved paths, or `None` if any required tool is missing.
+    list of str
+        A description of each missing tool, empty if none are missing.
+
+    See Also
+    --------
+    _resolve_vendored : Tried first, before this fallback.
+
+    Examples
+    --------
+    >>> from numba_enzyme.toolchain import _resolve_system
+    >>> _resolve_system()  # doctest: +SKIP
+    (Toolchain(clang=..., llvm_link=..., opt=..., enzyme_plugin=...), [])
+    """
+    clang = _which("clang-15")
+    llvm_link = _which("llvm-link-15")
+    opt = _which("opt-15")
+
+    plugin_override = os.environ.get(_PLUGIN_PATH_ENV_VAR)
+    enzyme_plugin = Path(plugin_override) if plugin_override else _DEFAULT_PLUGIN_PATH
+
+    missing = []
+    if clang is None:
+        missing.append("clang-15 (not found on PATH)")
+    if llvm_link is None:
+        missing.append("llvm-link-15 (not found on PATH)")
+    if opt is None:
+        missing.append("opt-15 (not found on PATH)")
+    if not enzyme_plugin.is_file():
+        missing.append(
+            f"Enzyme plugin (not found at {enzyme_plugin}; "
+            f"override with the {_PLUGIN_PATH_ENV_VAR} env var)"
+        )
+    if missing:
+        return None, missing
+
+    return (
+        Toolchain(
+            clang=clang, llvm_link=llvm_link, opt=opt, enzyme_plugin=enzyme_plugin
+        ),
+        [],
+    )
+
+
 @lru_cache(maxsize=1)
 def get_toolchain() -> Toolchain:
     """
     Resolve and validate every build tool.
 
-    Looks up ``clang-15``, ``llvm-link-15``, and ``opt-15`` in ``PATH``,
-    and the standalone Enzyme LLVM pass plugin at a path relative to the
-    repository root (overridable via the ``NUMBA_ENZYME_PLUGIN_PATH``
-    environment variable). The result is cached after the first
+    Priorities the `_vendor/` directory shipped alongside
+    this module in a built wheel; falls back to
+    ``clang-15``/``llvm-link-15``/``opt-15`` on ``PATH``
+    and the standalone Enzyme LLVM pass plugin at a path
+    relative to the repository root (configurable via the
+    ``NUMBA_ENZYME_PLUGIN_PATH`` environment variable)
+    otherwise. The result is cached after the first
     successful call.
 
     Returns
@@ -144,36 +233,22 @@ def get_toolchain() -> Toolchain:
 
     >>> get_toolchain.cache_clear()
     """
-    clang = _which("clang-15")
-    llvm_link = _which("llvm-link-15")
-    opt = _which("opt-15")
+    toolchain = _resolve_vendored()
+    if toolchain is None:
+        toolchain, missing = _resolve_system()
+        if toolchain is None:
+            raise ToolchainError(
+                "missing required build tool(s):\n  - " + "\n  - ".join(missing)
+            )
 
-    plugin_override = os.environ.get(_PLUGIN_PATH_ENV_VAR)
-    enzyme_plugin = Path(plugin_override) if plugin_override else _DEFAULT_PLUGIN_PATH
-
-    missing = []
-    if clang is None:
-        missing.append("clang-15 (not found on PATH)")
-    if llvm_link is None:
-        missing.append("llvm-link-15 (not found on PATH)")
-    if opt is None:
-        missing.append("opt-15 (not found on PATH)")
-    if not enzyme_plugin.is_file():
-        missing.append(
-            f"Enzyme plugin (not found at {enzyme_plugin}; "
-            f"override with the {_PLUGIN_PATH_ENV_VAR} env var)"
-        )
-    if missing:
-        raise ToolchainError(
-            "missing required build tool(s):\n  - " + "\n  - ".join(missing)
-        )
-
-    for tool in (clang, llvm_link, opt):
+    for tool in (toolchain.clang, toolchain.llvm_link, toolchain.opt):
+        if not tool.is_file():
+            raise ToolchainError(f"{tool} does not exist")
         if not os.access(tool, os.X_OK):
             raise ToolchainError(f"{tool} exists but is not executable")
-    if not os.access(enzyme_plugin, os.R_OK):
-        raise ToolchainError(f"{enzyme_plugin} exists but is not readable")
+    if not toolchain.enzyme_plugin.is_file():
+        raise ToolchainError(f"{toolchain.enzyme_plugin} does not exist")
+    if not os.access(toolchain.enzyme_plugin, os.R_OK):
+        raise ToolchainError(f"{toolchain.enzyme_plugin} exists but is not readable")
 
-    return Toolchain(
-        clang=clang, llvm_link=llvm_link, opt=opt, enzyme_plugin=enzyme_plugin
-    )
+    return toolchain
