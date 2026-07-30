@@ -53,13 +53,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #     interpreters into a container it doesn't control. Patch versions
 #     current as of authoring; bump to latest as needed.
 #
-#     auditwheel is installed into EVERY interpreter here, not just one:
-#     cibuildwheel's own docs say a custom image must already have
-#     auditwheel present, and its container-build repair step runs with
-#     the per-build interpreter's bin/ prepended to PATH
-#     (cibuildwheel/platforms/linux.py) -- installing it against only one
-#     interpreter and hoping PATH falls back to find it elsewhere isn't
-#     something to bet on. ---
+#     auditwheel and build are installed into EVERY interpreter here,
+#     not just one: cibuildwheel's own docs say a custom image must
+#     already have auditwheel present, and its container-build repair
+#     step runs with the per-build interpreter's bin/ prepended to PATH
+#     (cibuildwheel/platforms/linux.py) -- installing it against only
+#     one interpreter and hoping PATH falls back to find it elsewhere
+#     isn't something to bet on. `build` is the default build_frontend
+#     cibuildwheel invokes as `python -m build` to actually build the
+#     wheel -- confirmed missing in an earlier real run (ModuleNotFoundError). ---
 ARG PY311_VERSION=3.11.15
 ARG PY312_VERSION=3.12.13
 ARG PY313_VERSION=3.13.14
@@ -94,7 +96,7 @@ RUN set -eux; \
           && make -j"$(nproc)" \
           && make install ); \
         rm -rf /tmp/build /tmp/python.tar.xz; \
-        "/opt/python/${tag}/bin/python${minor}" -m pip install --no-cache-dir --upgrade pip auditwheel; \
+        "/opt/python/${tag}/bin/python${minor}" -m pip install --no-cache-dir --upgrade pip auditwheel build; \
         ln -sf "python${minor}" "/opt/python/${tag}/bin/python"; \
         ln -sf "python${minor}" "/opt/python/${tag}/bin/python3"; \
     done
