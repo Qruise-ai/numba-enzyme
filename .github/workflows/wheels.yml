@@ -1,0 +1,82 @@
+name: Build wheels
+# Build-only for now: this deliberately does NOT publish anywhere.
+# Publishing (TestPyPI/PyPI) needs the PyPI-side "trusted publisher"
+# registration (Settings -> Publishing on the numba-enzyme project,
+# pointing at this repo + workflow filename) done first -- a manual,
+# external, human step not done yet. Once that's set up, re-add
+# publish jobs gated on workflow_dispatch/tag-push with
+# `permissions: id-token: write` and `pypa/gh-action-pypi-publish`.
+#
+# Confirmed working end-to-end in a real Docker/cibuildwheel run
+# (2026-07-30) -- see the packaging plan / project memory for the full
+# debugging chain (auditwheel-per-interpreter, cp39 utility interpreter,
+# vendored ld.lld, vendored crt objects/libgcc). This workflow file
+# itself (the GitHub Actions jobs/caching/artifact-passing) is still
+# unverified in real CI -- only the underlying Docker/cibuildwheel
+# commands it wraps have been run for real so far.
+
+on:
+  push:
+    tags: ["v*"]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build-image:
+    name: Build manylinux container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Cached via GHA's own cache backend -- the image build compiles
+      # three CPython versions from source, expensive enough to be
+      # worth caching aggressively between runs.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packaging/Dockerfile.manylinux
+          tags: numba-enzyme-manylinux:latest
+          push: false
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save image for later jobs
+        run: docker save numba-enzyme-manylinux:latest -o /tmp/numba-enzyme-manylinux.tar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manylinux-image
+          path: /tmp/numba-enzyme-manylinux.tar
+          retention-days: 1
+
+  build-wheels:
+    name: Build wheels
+    needs: build-image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: manylinux-image
+          path: /tmp
+
+      - name: Load manylinux image
+        run: docker load -i /tmp/numba-enzyme-manylinux.tar
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.21
+        env:
+          CIBW_MANYLINUX_X86_64_IMAGE: numba-enzyme-manylinux:latest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels
+          path: wheelhouse/*.whl
+
+      - name: Report wheel sizes
+        run: ls -lh wheelhouse/*.whl

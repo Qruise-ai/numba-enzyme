@@ -32,3 +32,41 @@ def test_plugin_path_override(monkeypatch, tmp_path):
     tc = get_toolchain()
     assert tc.enzyme_plugin == fake_plugin
     get_toolchain.cache_clear()
+
+
+def _make_fake_vendor_dir(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    enzyme_dir = tmp_path / "enzyme"
+    enzyme_dir.mkdir()
+    for name in ("clang", "llvm-link", "opt"):
+        fake = bin_dir / name
+        fake.write_bytes(b"#!/bin/sh\n")
+        fake.chmod(0o755)
+    plugin = enzyme_dir / "LLVMEnzyme-15.so"
+    plugin.write_bytes(b"not a real plugin, just here for a stat check")
+    return tmp_path
+
+
+def test_vendored_toolchain_is_preferred_when_present(monkeypatch, tmp_path):
+    get_toolchain.cache_clear()
+    vendor_dir = _make_fake_vendor_dir(tmp_path)
+    monkeypatch.setattr("numba_enzyme.toolchain._VENDOR_DIR", vendor_dir)
+
+    tc = get_toolchain()
+    assert tc.clang == vendor_dir / "bin" / "clang"
+    assert tc.llvm_link == vendor_dir / "bin" / "llvm-link"
+    assert tc.opt == vendor_dir / "bin" / "opt"
+    assert tc.enzyme_plugin == vendor_dir / "enzyme" / "LLVMEnzyme-15.so"
+    get_toolchain.cache_clear()
+
+
+def test_falls_back_to_system_when_vendor_dir_absent(monkeypatch, tmp_path):
+    get_toolchain.cache_clear()
+    absent_dir = tmp_path / "does-not-exist"
+    monkeypatch.setattr("numba_enzyme.toolchain._VENDOR_DIR", absent_dir)
+
+    tc = get_toolchain()
+    assert tc.clang != absent_dir / "bin" / "clang"
+    assert tc.clang.is_file()
+    get_toolchain.cache_clear()

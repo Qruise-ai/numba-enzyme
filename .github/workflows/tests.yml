@@ -1,0 +1,87 @@
+name: Tests
+# Runs the actual `numba_enzyme` test suite on every pull request. This
+# is deliberately separate from wheels.yml (which is tag/release-only
+# and builds a whole custom manylinux image with three from-source
+# CPython builds -- overkill for just running pytest).
+#
+# LLVM 15 is no longer served by apt.llvm.org for any *current*
+# Ubuntu/Debian codename (its supported window has moved on) -- so this
+# job runs inside a plain debian:trixie container and reuses the exact
+# same pinned apt.llvm.org bookworm-15 channel that
+# packaging/Dockerfile.manylinux already uses successfully (confirmed
+# in a real Docker run, not just locally). The Enzyme plugin itself is
+# built at enzyme-build/ via packaging/build_enzyme_plugin.sh, which is
+# exactly where toolchain.py's default resolution already looks --
+# matching how every dev box (including the one this project was
+# authored on) is already set up, so no NUMBA_ENZYME_PLUGIN_PATH
+# override is needed here either.
+#
+# UNVERIFIED IN REAL CI as written (no GitHub Actions access in the
+# authoring sandbox): whether astral-sh/setup-uv (a JS action) runs
+# correctly inside this container, and actions/cache's hit/miss
+# behavior across PRs. Everything else -- the apt.llvm.org channel
+# resolving real packages, the CMake invocation producing
+# LLVMEnzyme-15.so, `uv run pytest`/`uv run pre-commit run --all-files`
+# both passing -- has been directly verified in the authoring sandbox.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      # debian:trixie ships no git at all, so `actions/checkout` would
+      # otherwise silently fall back to downloading a tarball via the
+      # GitHub API instead of a real git checkout -- leaving no `.git`
+      # directory behind. pre-commit needs a real git repo (it shells
+      # out to git itself, and clones its own hook repos on first run),
+      # so git must be installed *before* checkout runs.
+      - name: Install git
+        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      # GitHub Actions container jobs commonly hit git's "dubious
+      # ownership" check (the checkout directory's owning UID doesn't
+      # match the container user git runs as) -- confirmed by a real CI
+      # run failing here with "git failed. Is it installed, and are you
+      # in a Git repository directory?" even with git installed and a
+      # real checkout in place.
+      - name: Mark workspace as a safe git directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install LLVM 15 + build tools
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends \
+              curl gnupg ca-certificates cmake build-essential
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+              | gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-15 main" \
+              > /etc/apt/sources.list.d/llvm-15.list
+          apt-get update && apt-get install -y --no-install-recommends \
+              llvm-15-dev clang-15 lld-15
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Cache Enzyme plugin build
+        uses: actions/cache@v4
+        id: enzyme-cache
+        with:
+          path: enzyme-build
+          key: enzyme-v0.0.289-llvm15-${{ runner.os }}
+
+      - name: Build standalone Enzyme plugin
+        if: steps.enzyme-cache.outputs.cache-hit != 'true'
+        run: bash packaging/build_enzyme_plugin.sh enzyme-build
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+
+      - name: Run tests
+        run: uv run pytest -v
+
+      - name: Run pre-commit
+        run: uv run pre-commit run --all-files

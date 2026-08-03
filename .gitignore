@@ -8,3 +8,11 @@ enzyme-build/
 .pytest_cache/
 .ruff_cache/
 bk/
+
+# _vendor/ is populated at wheel-build time (see packaging/), never
+# committed as a matter of course -- but a blanket `*.so` above would
+# also make sdist-based build frontends silently drop the Enzyme
+# plugin from the wheel if it's ever present there. Un-ignore
+# explicitly rather than relying on which build frontend gets used.
+!src/numba_enzyme/_vendor/
+!src/numba_enzyme/_vendor/**
