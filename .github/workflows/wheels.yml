@@ -68,8 +68,16 @@ jobs:
       - name: Load manylinux image
         run: docker load -i /tmp/numba-enzyme-manylinux.tar
 
+      # Pinned to the exact version (4.1.1) already proven end-to-end
+      # against this project's Dockerfile/before-all/before-build
+      # scripts in a real Docker run -- an older version (2.21.3) was
+      # tried first and failed with a *different* hardcoded internal
+      # housekeeping interpreter path (cp38-cp38 instead of cp39-cp39),
+      # which the Dockerfile doesn't provision. Matching the exact
+      # version already tested avoids re-discovering whatever else
+      # differs between major cibuildwheel releases.
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.21
+        uses: pypa/cibuildwheel@v4.1.1
         env:
           CIBW_MANYLINUX_X86_64_IMAGE: numba-enzyme-manylinux:latest
 
