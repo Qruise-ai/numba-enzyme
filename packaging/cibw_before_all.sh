@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-ENZYME_TAG="v0.0.289"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAGING_DIR="/tmp/numba_enzyme_vendor_staging"
 
 rm -rf "$STAGING_DIR"
@@ -26,22 +26,9 @@ mkdir -p "$STAGING_DIR/bin" "$STAGING_DIR/enzyme" "$STAGING_DIR/crt"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-echo "== cloning Enzyme @ $ENZYME_TAG =="
-git clone --depth 1 --branch "$ENZYME_TAG" https://github.com/EnzymeAD/Enzyme.git "$WORK_DIR/enzyme-src"
-
-echo "== configuring Enzyme against LLVM 15 =="
-cmake -S "$WORK_DIR/enzyme-src/enzyme" -B "$WORK_DIR/enzyme-build" \
-    -DLLVM_DIR=/usr/lib/llvm-15/lib/cmake/llvm \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DENZYME_CLANG=OFF \
-    -DENZYME_MLIR=OFF \
-    -DENZYME_FORTRAN=OFF \
-    -DENZYME_FLANG=OFF \
-    -DENZYME_ENABLE_REACTANT=OFF \
-    -DENZYME_ENABLE_BENCHMARKS=OFF
-
-echo "== building LLVMEnzyme-15.so =="
-cmake --build "$WORK_DIR/enzyme-build" --target LLVMEnzyme-15 -j"$(nproc)"
+# Pinned Enzyme tag + CMake flags live in build_enzyme_plugin.sh, shared
+# with .github/workflows/tests.yml so the two can't silently drift.
+bash "$SCRIPT_DIR/build_enzyme_plugin.sh" "$WORK_DIR/enzyme-build"
 
 echo "== staging vendored binaries =="
 cp "$WORK_DIR/enzyme-build/Enzyme/LLVMEnzyme-15.so" "$STAGING_DIR/enzyme/LLVMEnzyme-15.so"
