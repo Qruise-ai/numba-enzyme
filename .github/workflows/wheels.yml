@@ -1,19 +1,4 @@
-name: Build wheels
-# Build-only for now: this deliberately does NOT publish anywhere.
-# Publishing (TestPyPI/PyPI) needs the PyPI-side "trusted publisher"
-# registration (Settings -> Publishing on the numba-enzyme project,
-# pointing at this repo + workflow filename) done first -- a manual,
-# external, human step not done yet. Once that's set up, re-add
-# publish jobs gated on workflow_dispatch/tag-push with
-# `permissions: id-token: write` and `pypa/gh-action-pypi-publish`.
-#
-# Confirmed working end-to-end in a real Docker/cibuildwheel run
-# (2026-07-30) -- see the packaging plan / project memory for the full
-# debugging chain (auditwheel-per-interpreter, cp39 utility interpreter,
-# vendored ld.lld, vendored crt objects/libgcc). This workflow file
-# itself (the GitHub Actions jobs/caching/artifact-passing) is still
-# unverified in real CI -- only the underlying Docker/cibuildwheel
-# commands it wraps have been run for real so far.
+name: Build and publish wheels
 
 on:
   push:
@@ -68,14 +53,8 @@ jobs:
       - name: Load manylinux image
         run: docker load -i /tmp/numba-enzyme-manylinux.tar
 
-      # Pinned to the exact version (4.1.1) already proven end-to-end
-      # against this project's Dockerfile/before-all/before-build
-      # scripts in a real Docker run -- an older version (2.21.3) was
-      # tried first and failed with a *different* hardcoded internal
-      # housekeeping interpreter path (cp38-cp38 instead of cp39-cp39),
-      # which the Dockerfile doesn't provision. Matching the exact
-      # version already tested avoids re-discovering whatever else
-      # differs between major cibuildwheel releases.
+      # Pinned to the exact version (4.1.1) for cp39-cp39
+      # compatibility.
       - name: Build wheels
         uses: pypa/cibuildwheel@v4.1.1
         env:
@@ -88,3 +67,44 @@ jobs:
 
       - name: Report wheel sizes
         run: ls -lh wheelhouse/*.whl
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build-wheels
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/numba-enzyme
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: wheelhouse
+
+      - uses: pypa/gh-action-pypi-publish@v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: wheelhouse
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build-wheels
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/numba-enzyme
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: wheelhouse
+
+      - uses: pypa/gh-action-pypi-publish@v1.14.2
+        with:
+          packages-dir: wheelhouse
