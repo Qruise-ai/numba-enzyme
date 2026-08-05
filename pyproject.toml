@@ -2,11 +2,32 @@
 name = "numba-enzyme"
 version = "0.1.0"
 description = "Differentiate Numba-compiled Python functions with the standalone Enzyme LLVM plugin (no Julia)."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [
+    { name = "Yousof Mardoukhi" },
+]
 requires-python = ">=3.11"
 dependencies = [
     "llvmlite==0.44.0",
     "numba==0.61.2",
 ]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Compilers",
+]
+
+[project.urls]
+Repository = "https://github.com/ymardoukhi/numba-autodiff"
 
 [build-system]
 requires = ["hatchling"]
