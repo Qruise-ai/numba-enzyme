@@ -1,6 +1,6 @@
 [project]
 name = "numba-enzyme"
-version = "0.1.0"
+version = "0.1.1"
 description = "Differentiate Numba-compiled Python functions with the standalone Enzyme LLVM plugin (no Julia)."
 readme = "README.md"
 license = "Apache-2.0"

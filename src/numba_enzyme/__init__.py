@@ -27,8 +27,10 @@ Examples
 (1.0806046117362795, 0.8414709848078965)
 """
 
+from importlib.metadata import version
+
 from numba_enzyme.core import Differentiable, differentiable, grad, jvp
 
-__version__ = "0.1.0"
+__version__ = version("numba-enzyme")
 
 __all__ = ["Differentiable", "differentiable", "grad", "jvp"]
