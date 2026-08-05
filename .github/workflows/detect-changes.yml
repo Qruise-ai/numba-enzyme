@@ -1,0 +1,31 @@
+name: Detect changes
+# Reusable workflow: computes whether files relevant to the test suite
+# changed in this pull request.
+
+on:
+  workflow_call:
+    outputs:
+      tests-relevant:
+        description: Whether files relevant to the test suite changed.
+        value: ${{ jobs.detect.outputs.tests-relevant }}
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      tests-relevant: ${{ steps.filter.outputs.tests-relevant }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            tests-relevant:
+              - 'src/**'
+              - 'tests/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'packaging/build_enzyme_plugin.sh'
+              - '.github/workflows/tests.yml'
+              - '.github/workflows/detect-changes.yml'
