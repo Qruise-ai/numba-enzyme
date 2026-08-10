@@ -2,10 +2,10 @@
 Locate the required external build tools.
 
 Resolves the ``clang``/``llvm-link``/``opt`` binaries
-and the standalone Enzyme LLVM pass plugin. Prefers a `_vendor/`
-directory shipped alongside this module (populated at wheel-build time
-by the `cibuildwheel` pipeline) and falls back to the system-installed,
-``PATH``-resolved tools used during development.
+and the standalone Enzyme LLVM pass plugin. Prioritise
+the `_vendor/` directory shipped alongside this module,
+and falls back to the system-installed, ``PATH``-resolved
+tools used during development.
 
 See Also
 --------
@@ -57,7 +57,7 @@ class ToolchainError(RuntimeError):
 @dataclass(frozen=True)
 class Toolchain:
     """
-    Resolved, validated paths to the build tools.
+    Resolved and validated paths to the build tools.
 
     Attributes
     ----------
@@ -105,7 +105,7 @@ def _which(name: str) -> Path | None:
     Examples
     --------
     >>> from numba_enzyme.toolchain import _which
-    >>> _which("nonexistent-tool-xyz") is None
+    >>> _which("arbitrary-tool") is None
     True
     """
     found = shutil.which(name)
@@ -203,10 +203,9 @@ def get_toolchain() -> Toolchain:
     this module in a built wheel; falls back to
     ``clang-15``/``llvm-link-15``/``opt-15`` on ``PATH``
     and the standalone Enzyme LLVM pass plugin at a path
-    relative to the repository root (configurable via the
-    ``NUMBA_ENZYME_PLUGIN_PATH`` environment variable)
-    otherwise. The result is cached after the first
-    successful call.
+    relative to the repository root otherwise (configurable
+    via the ``NUMBA_ENZYME_PLUGIN_PATH`` environment variable)
+    The result is cached after the first successful call.
 
     Returns
     -------

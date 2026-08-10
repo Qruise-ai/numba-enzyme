@@ -1,11 +1,11 @@
 """
 Load a built shared object and expose it as plain Python callables.
 
-Wraps a `~numba_enzyme.build.BuiltKernel`'s ``grad_<entry>``/
-``jvp_<entry>`` symbols with :mod:`ctypes`. ``grad_<entry>`` is void and
-writes through an explicit output pointer uniformly for every arity (see
-`numba_enzyme.driver`); ``jvp_<entry>`` always returns a bare `float`
-regardless of arity.
+Wraps a `numba_enzyme.build.BuiltKernel`'s ``grad_<entry>``/
+``jvp_<entry>`` symbols with :mod:`ctypes`.
+``grad_<entry>`` is void and writes through an explicit output pointer
+uniformly for every arity (see `numba_enzyme.driver`).
+``jvp_<entry>`` always returns a bare `float` regardless of arity.
 
 See Also
 --------

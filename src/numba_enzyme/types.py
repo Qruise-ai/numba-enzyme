@@ -186,7 +186,7 @@ def Array1D(T: Number):
     -------
     type
         Dynamically created type for
-        an one-dimensional array with
+        a one-dimensional array with
         a given element type.
     """
     return ArrayND(T, 1)
@@ -205,7 +205,7 @@ def Array2D(T: Number):
     -------
     type
         Dynamically created type for
-        an two-dimensional array with
+        a two-dimensional array with
         a given element type.
     """
-    return ArrayND(T, 1)
+    return ArrayND(T, 2)

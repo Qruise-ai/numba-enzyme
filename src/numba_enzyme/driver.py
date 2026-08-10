@@ -41,6 +41,7 @@ _EXCINFO_STRUCT = ir.LiteralStructType(
     ]
 )
 
+# TODO: expand for other scalar types
 _SCALAR_IR_TYPE = {
     "double": ir.DoubleType(),
     "float": ir.FloatType(),
@@ -111,6 +112,7 @@ def _target_lines(kernel_ir: str) -> tuple[str, str]:
     >>> _target_lines(lower(f).ir)  # doctest: +SKIP
     ('x86_64-unknown-linux-gnu', 'e-m:e-...')
     """
+    # TODO: instantiate them as empty string
     triple = datalayout = None
     for line in kernel_ir.splitlines():
         if line.startswith("target triple"):
