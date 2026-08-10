@@ -27,7 +27,7 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/ymardoukhi/numba-autodiff"
+Repository = "https://github.com/ymardoukhi/numba-enzyme"
 
 [build-system]
 requires = ["hatchling"]
