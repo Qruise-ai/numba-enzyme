@@ -177,20 +177,19 @@ def _locate_runtime_libs() -> list[Path]:
     memory map back is a distro/layout-agnostic way to find the exact
     file to link against -- unlike hardcoding a path convention such
     as Debian's ``/lib/x86_64-linux-gnu/``, which doesn't exist on e.g.
-    Fedora/RHEL/Arch. Confirmed empirically: a link built this way on
+    Fedora/RHEL/Arch. For instance a link built this way on
     Debian trixie produces a shared object whose only `NEEDED` entries
-    are ``libc.so.6``/``libm.so.6`` -- nothing path- or distro-specific
-    baked in.
+    are ``libc.so.6``/``libm.so.6``.
 
     Returns
     -------
     list of pathlib.Path
         Absolute paths to the loaded libc and (if present as a
-        separate mapping -- recent glibc merges it into libc) libm.
+        separate mapping as recent glibc merges it into libc) libm.
 
     See Also
     --------
-    build : The only caller; used when a vendored crt directory exists.
+    build : Used when a vendored crt directory exists.
 
     Examples
     --------
@@ -213,10 +212,10 @@ def build(func: Callable) -> BuiltKernel:
 
     Lowers `func` with Numba, synthesises its Enzyme driver, links the
     two with ``llvm-link``, runs the standalone Enzyme ``opt`` pass, and
-    compiles the result to a shared object with ``clang`` -- unless an
+    compiles the result to a shared object with ``clang``. If an
     identical build (same source text and toolchain fingerprint) is
-    already cached on disk, in which case that result is returned
-    directly with no subprocess calls.
+    already cached on disk, the cached one is returned without any
+    subprocess calls.
 
     Parameters
     ----------
@@ -249,13 +248,14 @@ def build(func: Callable) -> BuiltKernel:
     meta_path = entry_dir / "meta.json"
 
     if so_path.is_file() and meta_path.is_file():
-        # Don't call lower() again here: Numba embeds an internal version
-        # counter in the mangled symbol name that increments every time
-        # nb.cfunc compiles "the same" function again in the same process
-        # (e.g. ...B2v1... vs ...B2v2...), even with identical source.
-        # Recomputing symbol names on a cache hit would silently drift from
-        # what's actually embedded into the already-built .so. Persist them
-        # from the original build instead.
+        # if the statement is true, lower() isn't call again here. The
+        # reason is that Numba embeds an internal version counter in the
+        # mangled symbol name that increments every time nb.cfunc compiles
+        # the same function again in the same process (e.g. ...B2v1...
+        # vs ...B2v2...), even with identical source. Recomputing symbol
+        # names on a cache hit would silently drift from what's actually
+        # embedded into the already-built .so. Persist them from the
+        # original build instead.
         meta = json.loads(meta_path.read_text())
         return BuiltKernel(path=so_path, from_cache=True, **meta)
 
@@ -298,20 +298,15 @@ def build(func: Callable) -> BuiltKernel:
     # `clang -shared` shells out to a separate linker executable for the
     # final link step. A vendored toolchain (see toolchain.py) ships its
     # own `ld.lld` right next to clang specifically so this works with no
-    # system linker present at all -- confirmed necessary by a real
-    # install on a bare-minimum target (python:3.11-slim has no system
-    # `ld`/binutils: "clang: error: unable to execute command: Executable
-    # 'ld' doesn't exist!"). The system/dev-mode toolchain doesn't need
-    # this -- a normal dev machine already has a system `ld` -- so only
+    # system linker present at all. The system/dev-mode toolchain doesn't
+    # need this, a normal dev machine already has a system `ld`. So only
     # pass it when the vendored linker actually exists next to clang.
     vendored_lld = tc.clang.parent / "ld.lld"
     extra_link_args = [f"-fuse-ld={vendored_lld}"] if vendored_lld.is_file() else []
 
     # Even with a linker present, `-shared` needs C runtime startup
     # objects (crti.o/crtn.o/crtbeginS.o/crtendS.o) and libgcc, normally
-    # supplied by a system C toolchain (gcc/libc6-dev) -- confirmed
-    # missing on the same bare-minimum target ("ld.lld: error: cannot
-    # open crti.o", "unable to find library -lgcc"). A vendored
+    # supplied by a system C toolchain (gcc/libc6-dev). A vendored
     # toolchain ships these too (see cibw_before_all.sh); `-nostdlib`
     # stops clang from also trying to supply its own defaults (which
     # would look in system paths that don't exist here) so every input
