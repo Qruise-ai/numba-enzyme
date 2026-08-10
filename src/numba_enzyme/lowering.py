@@ -3,10 +3,8 @@ Lower a Python function to LLVM IR via Numba.
 
 Compiles a Python function to LLVM IR with Numba, using the function's
 own type annotations (:mod:`numba_enzyme.types` classes) to build the
-Numba signature, and recovers the mangled entry-point symbol -- the
-retptr/excinfo-ABI inner kernel, not the ``cfunc.`` wrapper. The recovered
-kernel's exact parameter types are validated against Numba's known ABI
-shape for use by driver synthesis.
+Numba signature.The recovered kernel's exact parameter types are validated
+against Numba's known ABI shape for use by driver synthesis.
 
 See Also
 --------
@@ -39,6 +37,7 @@ _EXPECTED_EXCINFO_TYPE = "{ i8*, i32, i8*, i8*, i32 }**"
 
 # LLVM textual type for each scalar numba type this package accepts as
 # an annotation (see numba_enzyme.types).
+# TODO: expand for other scalar types and arrays
 _LLVM_SCALAR_TYPE = {
     nb.types.float64: "double",
     nb.types.float32: "float",
@@ -55,8 +54,7 @@ class LoweringError(RuntimeError):
 
     Covers a missing/unresolvable type annotation, an unsupported
     scalar type, and any deviation from the retptr/excinfo entry-point
-    shape this package relies on (wrong parameter count, name, or LLVM
-    type).
+    shape (wrong parameter count, name, or LLVM type).
 
     See Also
     --------
@@ -242,6 +240,7 @@ def lower(func: Callable) -> LoweredKernel:
         raise LoweringError(
             f"expected native_name to start with {_CFUNC_PREFIX!r}, got {native_name!r}"
         )
+    # TODO: maybe better to use `replace(_CFUNC_PREFIX, "")`
     entry_symbol = native_name[len(_CFUNC_PREFIX) :]
 
     mod = llvm_binding.parse_assembly(ir_text)
