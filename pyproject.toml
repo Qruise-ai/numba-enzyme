@@ -27,7 +27,7 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/ymardoukhi/numba-enzyme"
+Repository = "https://github.com/Qruise-ai/numba-enzyme"
 
 [build-system]
 requires = ["hatchling"]
