@@ -65,4 +65,5 @@ forward- and reverse-mode. Arrays/reductions, `np.linalg`/BLAS, and
 
 ## License
 
-Apache License 2.0, © Qruise GmbH — see [LICENSE](LICENSE).
+Apache License 2.0, © Qruise GmbH — see [LICENSE](LICENSE) and
+[NOTICE](NOTICE).
