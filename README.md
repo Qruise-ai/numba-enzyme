@@ -19,7 +19,7 @@ pip install numba-enzyme-cuda
 |---|---|
 | OS / architecture | Linux x86_64 only |
 | glibc | ≥ 2.39 (e.g. Ubuntu 24.04+, Debian 13+, Fedora 39+) |
-| Python | CPython 3.11, 3.12, 3.13 |
+| Python | CPython 3.10, 3.11, 3.12, 3.13 |
 
 ## Usage
 

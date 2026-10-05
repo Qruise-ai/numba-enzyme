@@ -1,4 +1,4 @@
-import tomllib
+import re
 from pathlib import Path
 
 import numba_enzyme
@@ -7,8 +7,10 @@ _PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
 
 def test_import():
-    pyproject = tomllib.loads(_PYPROJECT.read_text())
-    assert numba_enzyme.__version__ == pyproject["project"]["version"]
+    # A regex rather than tomllib, which only arrived in Python 3.11.
+    match = re.search(r'^version = "([^"]+)"$', _PYPROJECT.read_text(), re.MULTILINE)
+    assert match is not None
+    assert numba_enzyme.__version__ == match.group(1)
 
 
 def test_public_derivative_api_is_exported():
